@@ -1,6 +1,7 @@
 # pip install fastapi uvicorn opencv-python-headless numpy dlib face-recognition
 
 
+from urllib.request import urlretrieve
 import uvicorn
 from fastapi import FastAPI, File, UploadFile
 import face_recognition
