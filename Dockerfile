@@ -1,7 +1,7 @@
 FROM python:3.9-slim-buster
 
 # Install dependencies
-RUN pip install fastapi uvicorn opencv-python-headless numpy dlib face-recognition
+RUN pip install fastapi uvicorn opencv-python-headless numpy dlib face-recognition pytesseract Pillow python-multipart requests
 
 # Set working directory
 WORKDIR /app

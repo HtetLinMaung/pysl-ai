@@ -1,4 +1,4 @@
-# pip install fastapi uvicorn opencv-python-headless numpy dlib face-recognition
+# pip install fastapi uvicorn opencv-python-headless numpy dlib face-recognition pytesseract Pillow python-multipart requests
 
 
 from urllib.request import urlretrieve
@@ -8,6 +8,10 @@ import face_recognition
 import os
 import numpy as np
 import cv2
+import pytesseract
+from PIL import Image
+import requests
+from io import BytesIO
 
 app = FastAPI()
 
@@ -151,6 +155,31 @@ async def match_face(url: str):
         return {"message": "Face matched successfully"}
     else:
         return {"error": "Could not match the face to any saved encodings"}
+
+
+def extract_text(image):
+    text = pytesseract.image_to_string(image)
+    return text
+
+
+@app.post("/extract-text")
+async def extract_text_api(image: UploadFile = File(...)):
+    with Image.open(image.file) as img:
+        text = extract_text(img)
+    return {"text": text}
+
+
+def extract_text(image):
+    text = pytesseract.image_to_string(image)
+    return text
+
+
+@app.post("/extract-text-v2")
+async def extract_text_api(image_url: str):
+    response = requests.get(image_url)
+    image = Image.open(BytesIO(response.content))
+    text = extract_text(image)
+    return {"text": text}
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
