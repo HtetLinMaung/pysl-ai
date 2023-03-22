@@ -1,5 +1,5 @@
 # pip install fastapi uvicorn opencv-python-headless numpy dlib face-recognition pytesseract Pillow python-multipart requests
-
+# https://scontent.frgn4-1.fna.fbcdn.net/v/t39.30808-1/297797132_3059369084354358_5333256072745780839_n.jpg?stp=dst-jpg_p200x200&_nc_cat=109&ccb=1-7&_nc_sid=7206a8&_nc_ohc=V0aQpuSu40kAX_ycdec&_nc_ht=scontent.frgn4-1.fna&oh=00_AfAHoCmE5AAc2oXMncLp8TZS8DuPsJ6wM-dkNnhnTGnB-w&oe=641F4E3C
 
 from urllib.request import urlretrieve
 import uvicorn
@@ -16,10 +16,10 @@ from io import BytesIO
 app = FastAPI()
 
 
-# curl -X POST -H "Content-Type: multipart/form-data" \
-# -F "file=@/path/to/image.jpg" \
-# -F "label=John" \
-# "http://localhost:8000/learn-face"
+# curl - X POST - H "Content-Type: multipart/form-data" \
+#     - F "file=@/home/user/Downloads/profile.jpg" \
+#     - F "label=HLM" \
+#     "http://localhost:8000/learn-face"
 # const axios = require('axios');
 
 # const formData = new FormData();
@@ -56,9 +56,15 @@ async def learn_face(file: UploadFile = File(...), label: str = Form(...)):
         with open(file_path, "a") as f:
             encoding_str = ",".join(str(val) for val in face_encoding)
             f.write(label + "," + encoding_str + "\n")
-        return {"message": "Face learned and saved to file successfully"}
+        return {
+            "code": 200,
+            "message": "Face learned and saved to file successfully",
+        }
     else:
-        return {"error": "Could not find a single face in the image"}
+        return {
+            "code": 500,
+            "message": "Could not find a single face in the image"
+        }
 
 
 # curl -X POST -H "Content-Type: application/json" -d '{"url": "https://example.com/image.jpg"}' http://localhost:8000/learn-face-v2
