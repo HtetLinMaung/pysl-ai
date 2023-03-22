@@ -1,9 +1,11 @@
-# pip install fastapi uvicorn opencv-python-headless numpy dlib face-recognition pytesseract Pillow python-multipart requests
-# https://scontent.frgn4-1.fna.fbcdn.net/v/t39.30808-1/297797132_3059369084354358_5333256072745780839_n.jpg?stp=dst-jpg_p200x200&_nc_cat=109&ccb=1-7&_nc_sid=7206a8&_nc_ohc=V0aQpuSu40kAX_ycdec&_nc_ht=scontent.frgn4-1.fna&oh=00_AfAHoCmE5AAc2oXMncLp8TZS8DuPsJ6wM-dkNnhnTGnB-w&oe=641F4E3C
+# pip install fastapi uvicorn opencv-python-headless numpy dlib face-recognition pytesseract Pillow python-multipart requests psycopg2
 
+
+import psycopg2
+import urllib.request
 from urllib.request import urlretrieve
 import uvicorn
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, File, Form, Request, UploadFile
 import face_recognition
 import os
 import numpy as np
@@ -62,42 +64,70 @@ async def learn_face(file: UploadFile = File(...), label: str = Form(...)):
         }
     else:
         return {
-            "code": 500,
+            "code": 400,
             "message": "Could not find a single face in the image"
         }
 
-
-# curl -X POST -H "Content-Type: application/json" -d '{"url": "https://example.com/image.jpg"}' http://localhost:8000/learn-face-v2
-# axios.post('http://localhost:8000/learn-face-v2', {
-#   "url": "https://example.com/image.jpg"
+# curl --location --request POST 'http://localhost:8000/learn-face-v2' \
+# --header 'Content-Type: application/json' \
+# --data-raw '{
+#     "image_url": "https://scontent.frgn4-1.fna.fbcdn.net/v/t39.30808-1/297797132_3059369084354358_5333256072745780839_n.jpg?stp=dst-jpg_p200x200&_nc_cat=109&ccb=1-7&_nc_sid=7206a8&_nc_ohc=V0aQpuSu40kAX_ycdec&_nc_ht=scontent.frgn4-1.fna&oh=00_AfAHoCmE5AAc2oXMncLp8TZS8DuPsJ6wM-dkNnhnTGnB-w&oe=641F4E3C",
+#     "label": "HLM"
+# }'
+# axios.post('http://localhost:8000/learn-face', {
+#     image_url: 'https://example.com/image.jpg',
+#     label: 'John Doe'
 # })
 # .then(response => {
-#   console.log(response.data);
+#     console.log(response.data);
 # })
 # .catch(error => {
-#   console.error(error);
+#     console.error(error);
 # });
 
 
 @app.post("/learn-face-v2")
-async def learn_face(url: str):
-    # Download the image from the URL and convert it to a numpy array
-    image_file, _ = urlretrieve(url)
-    image = cv2.imread(image_file)
+async def learn_face(request: Request):
+    data = await request.json()
+    image_url = data.get("image_url")
+    label = data.get("label")
+
+    # Download the image from URL and convert it to a numpy array
+    req = urllib.request.urlopen(image_url)
+    arr = np.asarray(bytearray(req.read()), dtype=np.uint8)
+    image = cv2.imdecode(arr, -1)
 
     # Find the face in the image and learn it
     face_locations = face_recognition.face_locations(image)
     if len(face_locations) == 1:
         face_encoding = face_recognition.face_encodings(
             image, face_locations)[0]
-        # Save the face encoding to a file
-        file_path = os.path.join(os.getcwd(), "face_encodings.txt")
-        with open(file_path, "a") as f:
-            encoding_str = ",".join(str(val) for val in face_encoding)
-            f.write(encoding_str + "\n")
-        return {"message": "Face learned and saved to file successfully"}
+
+        # Connect to the PostgreSQL database
+        conn = psycopg2.connect(
+            host="your_host",
+            database="your_database",
+            user="your_username",
+            password="your_password")
+
+        # Insert the face encoding and label into the database
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO face_encodings (label, encoding) VALUES (%s, %s);",
+                    (label, face_encoding.tobytes()))
+                conn.commit()
+
+        return {
+            "code": 200,
+            "message": "Face learned and saved to database successfully",
+        }
     else:
-        return {"error": "Could not find a single face in the image"}
+        return {
+            "code": 500,
+            "message": "Could not find a single face in the image"
+        }
+
 
 # curl -X POST -F "file=@/path/to/image.jpg" http://localhost:8000/match-face
 # function matchFace(file) {
