@@ -1,7 +1,6 @@
-# pip install fastapi uvicorn opencv-python-headless numpy dlib face-recognition pytesseract Pillow python-multipart requests psycopg2
+# pip install fastapi uvicorn opencv-python-headless numpy dlib face-recognition pytesseract Pillow python-multipart requests
 
 
-import psycopg2
 import urllib.request
 from urllib.request import urlretrieve
 import uvicorn
@@ -14,6 +13,7 @@ import pytesseract
 from PIL import Image
 import requests
 from io import BytesIO
+import fcntl
 
 app = FastAPI()
 
@@ -56,8 +56,14 @@ async def learn_face(file: UploadFile = File(...), label: str = Form(...)):
         # Save the face encoding with label to a file
         file_path = os.path.join(os.getcwd(), "face_encodings.txt")
         with open(file_path, "a") as f:
-            encoding_str = ",".join(str(val) for val in face_encoding)
-            f.write(label + "," + encoding_str + "\n")
+            fcntl.flock(f, fcntl.LOCK_EX)  # create an exclusive lock
+            try:
+                encoding_str = ",".join(str(val) for val in face_encoding)
+                f.write(label + "," + encoding_str + "\n")
+                f.flush()  # flush the buffer to ensure the write is complete
+                os.fsync(f.fileno())  # sync the file to disk
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)  # release the lock
         return {
             "code": 200,
             "message": "Face learned and saved to file successfully",
@@ -87,46 +93,122 @@ async def learn_face(file: UploadFile = File(...), label: str = Form(...)):
 
 
 @app.post("/learn-face-v2")
-async def learn_face(request: Request):
+async def learn_face_v2(request: Request):
     data = await request.json()
     image_url = data.get("image_url")
     label = data.get("label")
 
     # Download the image from URL and convert it to a numpy array
-    req = urllib.request.urlopen(image_url)
-    arr = np.asarray(bytearray(req.read()), dtype=np.uint8)
-    image = cv2.imdecode(arr, -1)
+    response = requests.get(image_url)
+    np_array = np.frombuffer(response.content, np.uint8)
+    image = cv2.imdecode(np_array, cv2.IMREAD_COLOR)
 
     # Find the face in the image and learn it
     face_locations = face_recognition.face_locations(image)
     if len(face_locations) == 1:
         face_encoding = face_recognition.face_encodings(
             image, face_locations)[0]
-
-        # Connect to the PostgreSQL database
-        conn = psycopg2.connect(
-            host="your_host",
-            database="your_database",
-            user="your_username",
-            password="your_password")
-
-        # Insert the face encoding and label into the database
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "INSERT INTO face_encodings (label, encoding) VALUES (%s, %s);",
-                    (label, face_encoding.tobytes()))
-                conn.commit()
-
+        # Save the face encoding with label to a file
+        file_path = os.path.join(os.getcwd(), "face_encodings.txt")
+        with open(file_path, "a") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)  # create an exclusive lock
+            try:
+                encoding_str = ",".join(str(val) for val in face_encoding)
+                f.write(label + "," + encoding_str + "\n")
+                f.flush()  # flush the buffer to ensure the write is complete
+                os.fsync(f.fileno())  # sync the file to disk
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)  # release the lock
         return {
             "code": 200,
-            "message": "Face learned and saved to database successfully",
+            "message": "Face learned and saved to file successfully",
         }
     else:
         return {
-            "code": 500,
+            "code": 400,
             "message": "Could not find a single face in the image"
         }
+
+# curl -X POST \
+#   http://localhost:8000/learn-faces-v2 \
+#   -H 'Content-Type: application/json' \
+#   -d '{
+#     "face_data": [
+#         {
+#             "image_url": "https://example.com/image1.jpg",
+#             "label": "John"
+#         },
+#         {
+#             "image_url": "https://example.com/image2.jpg",
+#             "label": "Jane"
+#         }
+#     ]
+# }'
+
+# import axios from 'axios';
+
+# const apiUrl = 'http://localhost:8000/learn-faces-v2';
+
+# const faceData = [
+#   {
+#     image_url: 'https://example.com/image1.jpg',
+#     label: 'John'
+#   },
+#   {
+#     image_url: 'https://example.com/image2.jpg',
+#     label: 'Jane'
+#   }
+# ];
+
+# axios.post(apiUrl, { face_data: faceData })
+#   .then(response => console.log(response.data))
+#   .catch(error => console.error(error));
+
+
+@app.post("/learn-faces-v2")
+async def learn_faces_v2(request: Request):
+    data = await request.json()
+    face_data = data.get("face_data")
+
+    message = ''
+    for face in face_data:
+        try:
+            image_url = face.get("image_url")
+            label = face.get("label")
+
+            # Download the image from URL and convert it to a numpy array
+            response = requests.get(image_url)
+            np_array = np.frombuffer(response.content, np.uint8)
+            image = cv2.imdecode(np_array, cv2.IMREAD_COLOR)
+
+            # Find the face in the image and learn it
+            face_locations = face_recognition.face_locations(image)
+            if len(face_locations) == 1:
+                face_encoding = face_recognition.face_encodings(
+                    image, face_locations)[0]
+                # Save the face encoding with label to a file
+                file_path = os.path.join(os.getcwd(), "face_encodings.txt")
+                with open(file_path, "a") as f:
+                    fcntl.flock(f, fcntl.LOCK_EX)  # create an exclusive lock
+                    try:
+                        encoding_str = ",".join(str(val)
+                                                for val in face_encoding)
+                        f.write(label + "," + encoding_str + "\n")
+                        f.flush()  # flush the buffer to ensure the write is complete
+                        os.fsync(f.fileno())  # sync the file to disk
+                    finally:
+                        fcntl.flock(f, fcntl.LOCK_UN)  # release the lock
+            else:
+                message += f"Could not find a single face in the image with URL {image_url}\n"
+                print(message)  # You can print the message for debug purposes.
+        except Exception as e:
+            message += f"Error processing image with URL {image_url}: {str(e)}\n"
+            print(message)  # You can print the message for debug purposes.
+
+    return {
+        "code": 200,
+        "message": f"{message}Faces learned and saved to file successfully",
+    }
 
 
 # curl -X POST -F "file=@/path/to/image.jpg" http://localhost:8000/match-face
@@ -153,63 +235,65 @@ async def match_face(file: UploadFile = File(...)):
     if len(face_locations) == 1:
         face_encoding = face_recognition.face_encodings(
             image, face_locations)[0]
+
+        # Load previously saved face encodings and labels
+        encodings_path = os.path.join(os.getcwd(), "face_encodings.txt")
+        with open(encodings_path, "r") as f:
+            face_encodings = []
+            face_labels = []
+            for line in f:
+                parts = line.strip().split(",")
+                face_labels.append(parts[0])
+                face_encodings.append(np.array(parts[1:], dtype=float))
+
+        # Find the closest match in the saved encodings and return the label
+        matches = face_recognition.compare_faces(face_encodings, face_encoding)
+        index = np.argwhere(matches).flatten()
+        if len(index) > 0:
+            label = face_labels[index[0]]
+            return {"code": 200, "message": "Face matched successfully", "label": label}
+        else:
+            return {"code": 400, "message": "Could not match the face to any saved encoding"}
     else:
-        return {"error": "Could not find a single face in the image"}
-
-    # Load saved face encodings and their labels from file
-    file_path = os.path.join(os.getcwd(), "face_encodings.txt")
-    with open(file_path, "r") as f:
-        saved_encodings = f.read().splitlines()
-
-    # Extract labels and face encodings from saved encodings
-    labels, encodings = [], []
-    for encoding_str in saved_encodings:
-        label, encoding = encoding_str.split(":")
-        labels.append(label)
-        encoding_arr = np.fromstring(encoding, sep=",")
-        encodings.append(encoding_arr)
-
-    # Compare face encoding to saved encodings
-    matches = face_recognition.compare_faces(encodings, face_encoding)
-
-    if True in matches:
-        # Get the label associated with the matched encoding
-        matched_label = labels[matches.index(True)]
-        return {"message": f"Face matched successfully with label {matched_label}"}
-    else:
-        return {"error": "Could not match the face to any saved encodings"}
+        return {"code": 400, "message": "Could not find a single face in the image"}
 
 
 @app.post("/match-face-v2")
-async def match_face(url: str):
-   # Download the image from the URL and convert it to a numpy array
-    image_file, _ = urlretrieve(url)
-    image = cv2.imread(image_file)
+async def match_face_v2(request: Request):
+    data = await request.json()
+    image_url = data.get("image_url")
+
+    # Download the image from URL and convert it to a numpy array
+    response = requests.get(image_url)
+    np_array = np.frombuffer(response.content, np.uint8)
+    image = cv2.imdecode(np_array, cv2.IMREAD_COLOR)
 
     # Find the face in the image and encode it
     face_locations = face_recognition.face_locations(image)
     if len(face_locations) == 1:
         face_encoding = face_recognition.face_encodings(
             image, face_locations)[0]
+
+        # Load previously saved face encodings and labels
+        encodings_path = os.path.join(os.getcwd(), "face_encodings.txt")
+        with open(encodings_path, "r") as f:
+            face_encodings = []
+            face_labels = []
+            for line in f:
+                parts = line.strip().split(",")
+                face_labels.append(parts[0])
+                face_encodings.append(np.array(parts[1:], dtype=float))
+
+        # Find the closest match in the saved encodings and return the label
+        matches = face_recognition.compare_faces(face_encodings, face_encoding)
+        index = np.argwhere(matches).flatten()
+        if len(index) > 0:
+            label = face_labels[index[0]]
+            return {"code": 200, "message": "Face matched successfully", "label": label}
+        else:
+            return {"code": 400, "message": "Could not match the face to any saved encoding"}
     else:
-        return {"error": "Could not find a single face in the image"}
-
-    # Load saved face encodings from file
-    file_path = os.path.join(os.getcwd(), "face_encodings.txt")
-    with open(file_path, "r") as f:
-        saved_encodings = f.read().splitlines()
-
-    # Convert saved encodings to numpy arrays
-    saved_encodings = [np.fromstring(encoding, sep=",")
-                       for encoding in saved_encodings]
-
-    # Compare face encoding to saved encodings
-    matches = face_recognition.compare_faces(saved_encodings, face_encoding)
-
-    if True in matches:
-        return {"message": "Face matched successfully"}
-    else:
-        return {"error": "Could not match the face to any saved encodings"}
+        return {"code": 400, "message": "Could not find a single face in the image"}
 
 
 def extract_text(image):
