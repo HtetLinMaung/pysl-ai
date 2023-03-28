@@ -1,10 +1,8 @@
 # pip install fastapi uvicorn opencv-python-headless numpy dlib face-recognition pytesseract Pillow python-multipart requests
 
 
-import urllib.request
-from urllib.request import urlretrieve
+from fastapi import FastAPI, File, UploadFile, Form, Request
 import uvicorn
-from fastapi import FastAPI, File, Form, Request, UploadFile
 import face_recognition
 import os
 import numpy as np
@@ -14,8 +12,96 @@ from PIL import Image
 import requests
 from io import BytesIO
 import fcntl
+from fastapi.responses import JSONResponse
+
 
 app = FastAPI()
+
+
+@app.post("/detect-face")
+async def detect_face(file: UploadFile = File(...)):
+    # Read the image file and convert it to a numpy array
+    contents = await file.read()
+    np_array = np.fromstring(contents, np.uint8)
+    image = cv2.imdecode(np_array, cv2.IMREAD_COLOR)
+
+    # Find the face in the image and encode it
+    face_locations = face_recognition.face_locations(image)
+    face_encodings = face_recognition.face_encodings(image, face_locations)
+
+    # Convert the face positions to a list of dictionaries
+    face_positions = [
+        {
+            "top": top,
+            "right": right,
+            "bottom": bottom,
+            "left": left
+        }
+        for top, right, bottom, left in face_locations
+    ]
+
+    # Convert the face encodings to a list of strings
+    face_encodings_str = [
+        ",".join(str(val) for val in encoding)
+        for encoding in face_encodings
+    ]
+
+    return {
+        "code": 200,
+        "message": "Faces detected successfully",
+        "positions": face_positions,
+        "encodings": face_encodings_str
+    }
+
+# curl -X POST -H "Content-Type: application/json" -d '{"url": "https://scontent.frgn4-1.fna.fbcdn.net/v/t39.30808-1/297797132_3059369084354358_5333256072745780839_n.jpg?stp=dst-jpg_p200x200&_nc_cat=109&ccb=1-7&_nc_sid=7206a8&_nc_ohc=Umk6RaoePlUAX_ZvvBV&_nc_ht=scontent.frgn4-1.fna&oh=00_AfC5dA51GFNuLAR2Xhx_P2oam6Sn8QQEh7QoceInHTWLMQ&oe=6427373C"}' http://localhost:8000/detect-face-v2
+# axios.post('http://localhost:8000/detect-face-v2', {
+#     url: 'https://example.com/image.jpg'
+# })
+# .then(response => {
+#     console.log(response.data);
+# })
+# .catch(error => {
+#     console.error(error);
+# });
+
+
+@app.post("/detect-face-v2")
+async def detect_face_v2(request: Request):
+    # Read the image file from URL and convert it to a numpy array
+    data = await request.json()
+    url = data.get('url')
+    response = requests.get(url)
+    contents = response.content
+    np_array = np.fromstring(contents, np.uint8)
+    image = cv2.imdecode(np_array, cv2.IMREAD_COLOR)
+
+    # Find the face in the image and encode it
+    face_locations = face_recognition.face_locations(image)
+    face_encodings = face_recognition.face_encodings(image, face_locations)
+
+    # Convert the face positions to a list of dictionaries
+    face_positions = [
+        {
+            "top": top,
+            "right": right,
+            "bottom": bottom,
+            "left": left
+        }
+        for top, right, bottom, left in face_locations
+    ]
+
+    # Convert the face encodings to a list of strings
+    face_encodings_str = [
+        ",".join(str(val) for val in encoding)
+        for encoding in face_encodings
+    ]
+
+    return {
+        "code": 200,
+        "message": "Faces detected successfully",
+        "positions": face_positions,
+        "encodings": face_encodings_str
+    }
 
 
 # curl - X POST - H "Content-Type: multipart/form-data" \
@@ -294,6 +380,49 @@ async def match_face_v2(request: Request):
             return {"code": 400, "message": "Could not match the face to any saved encoding"}
     else:
         return {"code": 400, "message": "Could not find a single face in the image"}
+
+
+@app.post("/match-faces-from-encodings")
+async def match_faces_from_encodings(request: Request):
+    request_body = await request.json()
+
+    # Extract data from the request body
+    url = request_body['url']
+    face_encodings = request_body['face_encodings']
+
+    # Read the image file from URL and convert it to a numpy array
+    response = requests.get(url)
+    contents = response.content
+    np_array = np.frombuffer(contents, np.uint8)
+    image = cv2.imdecode(np_array, cv2.IMREAD_COLOR)
+
+    # Find the faces in the image and encode them
+    face_locations = face_recognition.face_locations(image)
+    face_encodings_image = face_recognition.face_encodings(
+        image, face_locations)
+
+    # Load the face encodings from the JSON request body
+    face_encodings_list = []
+    labels = []
+    for encoding in face_encodings:
+        face_encodings_list.append(np.array(encoding['encoding']))
+        labels.append(encoding['label'])
+
+    # Check for matches between the image face encodings and the external face encodings
+    matches_list = []
+    for face_encoding_image in face_encodings_image:
+        matches = face_recognition.compare_faces(
+            face_encodings_list, face_encoding_image)
+        matches_face = []
+        for label, match in zip(labels, matches):
+            matches_face.append({"label": label, "match": match})
+        matches_list.append(matches_face)
+
+    return JSONResponse(content={
+        "code": 200,
+        "message": "Face matched successfully",
+        "matches": matches_list
+    })
 
 
 def extract_text(image):
